@@ -56,7 +56,7 @@ Kell: WiX v5 (`dotnet tool install --global wix`) és `wix extension add -g WixT
 powershell -ExecutionPolicy Bypass -File .\build-msi.ps1
 ```
 
-A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatásnál emeld. Az ikont, a telepítő képeit (`dialog.bmp`, `banner.bmp`), a kis logót és a leírást a build generálja az `installerrp_logo.png`-ből.
+A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatásnál emeld. Az ikont, a telepítő képeit (`dialog.bmp`, `banner.bmp`), a kis logót és a leírást a build generálja az `installer\arp_logo.png`-ből.
 
 ## Arculat
 
