@@ -1,0 +1,4 @@
+dist/
+installer/app.ico
+installer/leiras.rtf
+*.wixpdb

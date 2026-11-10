@@ -2,30 +2,56 @@
 
 Az ÁNYK (abevjava) programot, a letöltött nyomtatványokat, a beállításokat és a mentett adatokat viszi át egyik Windows gépről a másikra.
 
-## Használat
+## MSI (ajánlott)
 
-1. Régi gép: zárd be az ÁNYK-t, és futtasd az `ANYK-Mentes.cmd` fájlt.
-   A script mellé kerül egy `ANYK-mentes-<gépnév>-<dátum>.zip`.
+`dist\ANYK-Atkoltozes-<verzió>.msi` telepítése után a program elindul (Start menü és asztal: "ÁNYK átköltöztetés"). Indításkor megkérdezi, mit szeretnél:
+
+- **Mentés** (régi gép): bekéri, hol van az ÁNYK programmappája (abevjava, automatikusan kitöltve, ha megtalálja), és hova kerüljön a ZIP.
+- **Visszatöltés** (új gép, rendszergazdai jogot kér):
+  1. ellenőrzi a Javát és az ÁNYK-t, ami hiányzik, telepíti,
+  2. bekéri a mentést (ZIP), és a helyére teszi.
+
+Az MSI magától nem tud fájlválasztót mutatni (ez a Windows Installer korlátja), ezért egy kis grafikus programot telepít, és azt indítja el a telepítés végén.
+
+## Parancssor
+
+1. Régi gép: zárd be az ÁNYK-t, futtasd az `ANYK-Mentes.cmd`-t. A script mellé kerül egy `ANYK-mentes-<gépnév>-<dátum>.zip`.
 2. Másold a mappát (scriptek + ZIP) pendrive-ra.
-3. Új gép: futtasd az `ANYK-Visszatoltes.cmd` fájlt. Rendszergazdai jogot kér.
-
-## Mit csinál a visszatöltés
-
-- Java nincs: telepíti wingettel (`EclipseAdoptium.Temurin.21.JRE`).
-- ÁNYK nincs: ha a script mellett van `abevjava_install.jar` (NAV-tól letöltve), a hivatalos telepítőt indítja.
-  Ha nincs, a mentett programmappát másolja vissza, és parancsikont tesz az asztalra és a Start menübe.
-- ÁNYK van: csak a hiányzó nyomtatványokat pótolja, újabb fájlt nem ír felül.
-- Visszatölti a `%USERPROFILE%\.abevjava` (beállítások) és a `%USERPROFILE%\abevjava` (mentések, KR-fájlok) mappát.
-  A beállításokban talált egyéb mappákat is (pl. `D:\ANYK_mentesek`).
-- Ha a célmappában már van valami, előbb `<mappa>.elotte-<dátum>` néven biztonsági másolatot készít.
-- Más felhasználónév vagy hiányzó meghajtó esetén átírja az útvonalakat az `.enyk` fájlokban (az eredetit `.elotte-<dátum>` néven megtartja).
-- A végén ellenőriz: program, Java, fájlszámok.
-
-## Kapcsolók
+3. Új gép: futtasd az `ANYK-Visszatoltes.cmd`-t. Rendszergazdai jogot kér.
 
 ```
 .\ANYK-Atkoltozes.ps1 -Mentes [-Cel E:\] [-ExtraPath 'D:\Valami'] [-ProgramDir 'C:\...\abevjava']
+.\ANYK-Atkoltozes.ps1 -Telepites [-ProgramDir <cél>]
 .\ANYK-Atkoltozes.ps1 -Visszatoltes [-Archiv <zip>] [-Telepito <abevjava_install.jar>] [-ProgramDir <cél>] [-NincsParancsikon]
 ```
 
-A felhasználói adatok annak a felhasználónak a profiljába kerülnek, aki a scriptet indítja. Ezért annak a felhasználónak a nevében futtasd, aki az ÁNYK-t használni fogja.
+Kilépési kódok: 0 rendben, 1 hiba, 3 az ÁNYK nem települt a NAV-ról (a visszatöltés a mentésből telepíti), 4 kész, de figyelmeztetéssel.
+
+## Mit ment
+
+- az ÁNYK programmappáját a letöltött nyomtatványokkal (enélkül a régi mentések nem nyílnak meg),
+- `%USERPROFILE%\.abevjava` (beállítások, `<felhasználó>.enyk`),
+- `%USERPROFILE%\abevjava` (mentések, KR-fájlok, napló),
+- a beállításokban hivatkozott egyéb mappákat (pl. `D:\ANYK_mentesek`).
+
+## Mit csinál a visszatöltés
+
+- **Java nincs:** Eclipse Temurin 21 JRE wingettel, ha nincs winget, az adoptium.net MSI-jével.
+- **ÁNYK nincs:** letölti a hivatalos telepítőt a nav.gov.hu-ról, és úgy bontja ki, ahogy a NAV telepítője: `Program Files\abevjava`, `abevjava_start.bat`, `setenv.bat`, `%windir%\abevjavapath.cfg`, parancsikon. Ha a NAV nem érhető el, a mentett programmappát másolja vissza.
+- **ÁNYK van:** csak a hiányzó nyomtatványokat pótolja, újabb fájlt nem ír felül.
+- **Felhasználói adatok:** visszatölti őket. Ha a célmappában már van valami, előbb `<mappa>.elotte-<dátum>` másolatot készít.
+- **Más felhasználónév:** a `<régi>.enyk` fájlt átmásolja `<új>.enyk` néven. Az útvonalakat átírja az `.enyk` fájlokban, az eredetit megtartja.
+- **Java-kapcsoló:** a NAV indítószkriptje `--add-modules=java.se.ee` kapcsolóval indul. Ha a gépen lévő Java ezt nem fogadja el, a script kiveszi a kapcsolót, különben az ÁNYK nem indulna.
+- **A végén ellenőriz:** program, Java, beállítás, fájlszámok.
+
+A felhasználói adatok annak a felhasználónak a profiljába kerülnek, aki a programot elindítja (az emelt jogú újraindítás is ezt a profilt használja).
+
+## MSI építése
+
+Kell: WiX v5 (`dotnet tool install --global wix`) és `wix extension add -g WixToolset.UI.wixext`.
+
+```
+powershell -ExecutionPolicy Bypass -File .\build-msi.ps1
+```
+
+A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatásnál emeld. Az ikont és a telepítő leírását a build generálja.

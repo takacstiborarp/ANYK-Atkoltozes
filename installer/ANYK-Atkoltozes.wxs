@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ÁNYK átköltöztetés MSI (WiX v5).
+  A program a Program Files\ANYK-Atkoltozes mappába kerül, parancsikon a Start menübe és az asztalra.
+  A telepítés végén a Befejezés gomb elindítja a grafikus felületet (felhasználói jogokkal).
+  Építés: build-msi.ps1
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="ÁNYK átköltöztetés"
+           Manufacturer="ARP Hungary"
+           Version="$(var.Verzio)"
+           UpgradeCode="5C904CCC-79B4-46F4-B267-43B559E3230C"
+           Scope="perMachine"
+           Language="1038"
+           Codepage="1250">
+
+    <MajorUpgrade DowngradeErrorMessage="Már újabb ÁNYK átköltöztetés van telepítve." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="app.ico" SourceFile="$(var.Gyoker)\installer\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="app.ico" />
+    <Property Id="ARPCOMMENTS" Value="ÁNYK (abevjava) mentése és visszatöltése gépcseréhez." />
+
+    <SetProperty Id="PSEXE" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe" Before="CostFinalize" Sequence="both" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ANYK-Atkoltozes">
+        <Component Id="Fajlok" Guid="8E1B1E61-5B0B-4F8E-9E57-2F7D6A0C4D11">
+          <File Id="Core" Source="$(var.Gyoker)\ANYK-Atkoltozes.ps1" KeyPath="yes" />
+          <File Id="Gui" Source="$(var.Gyoker)\ANYK-Atkoltozes-GUI.ps1" />
+          <File Id="Leiras" Source="$(var.Gyoker)\README.md" />
+          <File Id="Ikon" Source="$(var.Gyoker)\installer\app.ico" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenu" Guid="2B7C6E0A-3D4F-4A51-8C2E-6F1A9B0D7E21">
+        <Shortcut Id="StartMenuIkon"
+                  Name="ÁNYK átköltöztetés"
+                  Description="ÁNYK mentése és visszatöltése"
+                  Target="[PSEXE]"
+                  Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]ANYK-Atkoltozes-GUI.ps1&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="app.ico"
+                  Show="normal" />
+        <RegistryValue Root="HKLM" Key="Software\ARP Hungary\ANYK-Atkoltozes" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="Asztal" Guid="9D4E2F13-7A6B-4C80-B1D5-3E8F0A2C6B47">
+        <Shortcut Id="AsztalIkon"
+                  Name="ÁNYK átköltöztetés"
+                  Description="ÁNYK mentése és visszatöltése"
+                  Target="[PSEXE]"
+                  Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]ANYK-Atkoltozes-GUI.ps1&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="app.ico"
+                  Show="normal" />
+        <RegistryValue Root="HKLM" Key="Software\ARP Hungary\ANYK-Atkoltozes" Name="Asztal" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Indítás a telepítés végén. A UI-folyamatban fut, tehát a felhasználó jogaival. -->
+    <CustomAction Id="Inditas"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[PSEXE]&quot; -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]ANYK-Atkoltozes-GUI.ps1&quot;"
+                  Return="asyncNoWait"
+                  Impersonate="yes" />
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="ÁNYK átköltöztetés indítása most" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.Gyoker)\installer\leiras.rtf" />
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="Inditas"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

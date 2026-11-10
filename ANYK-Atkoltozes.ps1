@@ -12,10 +12,13 @@
       - a beállításokban talált egyéb adatmappákat is (pl. D:\ANYK_mentesek),
       - mindezt egy ZIP-be teszi: ANYK-mentes-<gépnév>-<dátum>.zip
 
+    Telepítés (új gép, a visszatöltés első lépése):
+      - ellenőrzi a Javát, ha nincs, telepíti (winget, tartaléknak az Adoptium MSI),
+      - ellenőrzi az ÁNYK-t, ha nincs, letölti a hivatalos NAV-telepítőt, és úgy bontja ki,
+        ahogy a NAV telepítője (indítószkriptek, abevjavapath.cfg, parancsikon).
+
     Visszatöltés (új gép):
-      - ellenőrzi a Javát, ha nincs, telepíti (winget, Temurin JRE),
-      - ellenőrzi az ÁNYK-t, ha nincs, telepíti
-        (a hivatalos abevjava_install.jar-ral, ha a script mellett van, különben a mentett programmappából),
+      - a telepítés lépéseit is elvégzi, ha valami hiányzik,
       - visszatölti a beállításokat és az adatokat,
       - átírja az útvonalakat, ha az új gépen más a felhasználónév vagy a mappa,
       - a végén ellenőrzi az eredményt.
@@ -23,12 +26,14 @@
 .EXAMPLE
     .\ANYK-Atkoltozes.ps1 -Mentes
     .\ANYK-Atkoltozes.ps1 -Mentes -Cel E:\ -ExtraPath 'D:\Ugyfelek\ANYK'
+    .\ANYK-Atkoltozes.ps1 -Telepites
     .\ANYK-Atkoltozes.ps1 -Visszatoltes
     .\ANYK-Atkoltozes.ps1 -Visszatoltes -Archiv E:\ANYK-mentes-REGIPC-20261110-0930.zip
 #>
 [CmdletBinding()]
 param(
     [switch]$Mentes,
+    [switch]$Telepites,
     [switch]$Visszatoltes,
     [string]$Archiv,
     [string]$Cel = $PSScriptRoot,
@@ -36,14 +41,27 @@ param(
     [string]$Telepito,
     [string]$ProgramDir,
     [string]$Profil = $env:USERPROFILE,
+    [string]$Felhasznalo = $env:USERNAME,
     [string]$JavaWingetId = 'EclipseAdoptium.Temurin.21.JRE',
     [switch]$NincsParancsikon,
-    [switch]$Szunet
+    [switch]$Szunet,
+    [switch]$Gui,
+    [switch]$Konyvtar
 )
 
+$Verzio = '1.1.0'
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+if ($Gui) { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false }
 $Ido = Get-Date -Format 'yyyyMMdd-HHmm'
+$Profil = $Profil.TrimEnd('\')
+
+$NavTelepitoUrl = 'https://nav.gov.hu/pfile/programFile?path=/nyomtatvanyok/letoltesek/nyomtatvanykitolto_programok/nyomtatvany_apeh/keretprogramok/AbevJava'
+$AdoptiumMsiUrl = 'https://api.adoptium.net/v3/installer/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk'
+$AnykAlapDir    = Join-Path $env:ProgramFiles 'abevjava'
+$PathCfg        = Join-Path $env:windir 'abevjavapath.cfg'
 
 function Info($m) { Write-Host "[ANYK] $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "[ OK ] $m" -ForegroundColor Green }
@@ -64,9 +82,19 @@ function Test-AnykDir([string]$d) {
         @(Get-ChildItem -LiteralPath $d -Filter 'abevjava*.jar' -File -ErrorAction SilentlyContinue).Count -gt 0
 }
 
+# A NAV-telepítő ide írja a programmappát: abevjava.path=C:\\Program Files\\abevjava
+function Read-PathCfg([string]$f) {
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $sor = Get-Content -LiteralPath $f -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*abevjava\.path\s*=' } | Select-Object -First 1
+    if (-not $sor) { return $null }
+    (($sor -split '=', 2)[1].Trim()) -replace '\\:', ':' -replace '\\\\', '\'
+}
+
 function Find-AnykDir([string]$Hint) {
     $c = @()
     if ($Hint) { $c += $Hint }
+    $c += Read-PathCfg $PathCfg
+    $c += Read-PathCfg (Join-Path $Profil '.abevjava\abevjavapath.cfg')
     $kulcsok = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
                'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
                'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
@@ -78,14 +106,15 @@ function Find-AnykDir([string]$Hint) {
             }
         }
     }
-    $c += "${env:ProgramFiles(x86)}\abevjava", "$env:ProgramFiles\abevjava", 'C:\abevjava', "$Profil\abevjava"
+    $c += "$env:ProgramFiles\abevjava", "${env:ProgramFiles(x86)}\abevjava", 'C:\abevjava', "$Profil\abevjava"
     foreach ($d in $c) {
         if (Test-AnykDir $d) { return (Resolve-Path -LiteralPath $d).Path.TrimEnd('\') }
     }
     return $null
 }
 
-function Find-Javaw {
+function Find-Javaw([string]$prog) {
+    if ($prog -and (Test-Path "$prog\jre\bin\javaw.exe")) { return "$prog\jre\bin\javaw.exe" }
     $c = Get-Command javaw.exe -ErrorAction SilentlyContinue
     if ($c) { return $c.Source }
     if ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\javaw.exe")) { return "$env:JAVA_HOME\bin\javaw.exe" }
@@ -95,6 +124,97 @@ function Find-Javaw {
         if ($t) { return $t.FullName }
     }
     return $null
+}
+
+function Install-Java {
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        Info "Java telepítése wingettel: $JavaWingetId"
+        & winget.exe install --id $JavaWingetId -e --silent --source winget --accept-package-agreements --accept-source-agreements | Out-Null
+        $global:LASTEXITCODE = 0
+        $j = Find-Javaw
+        if ($j) { return $j }
+        Warn 'A winget nem telepítette a Javát. Próbálom az Adoptium telepítőjével.'
+    } else {
+        Info 'Nincs winget. A Javát az Adoptium oldaláról töltöm le.'
+    }
+    $msi = Join-Path $env:TEMP "temurin-jre-$Ido.msi"
+    Invoke-WebRequest -Uri $AdoptiumMsiUrl -OutFile $msi -UseBasicParsing
+    Info 'Java telepítése (Temurin JRE)...'
+    $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart',
+         'ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJarFileRunWith' -Wait -PassThru
+    Remove-Item $msi -Force -ErrorAction SilentlyContinue
+    if ($p.ExitCode -notin 0, 3010) { Warn "A Java telepítő hibakóddal állt le: $($p.ExitCode)" }
+    Find-Javaw
+}
+
+# Ugyanazt csinálja, mint a NAV jarinstaller: az application\ mappát a programmappába bontja,
+# megírja a setenv.bat-ot és az abevjava_start.bat-ot.
+function Install-AnykNav([string]$cel) {
+    $jar = Join-Path $env:TEMP "abevjava_install-$Ido.jar"
+    Info 'A hivatalos ÁNYK-telepítő letöltése a NAV oldaláról...'
+    Invoke-WebRequest -Uri $NavTelepitoUrl -OutFile $jar -UseBasicParsing -UserAgent 'Mozilla/5.0'
+    $z = [IO.Compression.ZipFile]::OpenRead($jar)
+    try {
+        if (-not ($z.Entries | Where-Object FullName -eq 'application/abevjava.jar')) {
+            throw 'A letöltött fájl nem ÁNYK-telepítő.'
+        }
+        Info "Kibontás ide: $cel"
+        foreach ($e in $z.Entries) {
+            if (-not $e.FullName.StartsWith('application/') -or $e.FullName.EndsWith('/')) { continue }
+            $dest = Join-Path $cel ($e.FullName.Substring(12) -replace '/', '\')
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
+        }
+    } finally { $z.Dispose(); Remove-Item $jar -Force -ErrorAction SilentlyContinue }
+
+    foreach ($d in 'abev', 'abev\kontroll', 'segitseg', 'eroforrasok', 'nyomtatvanyok', 'nyomtatvanyok_archivum', 'upgrade') {
+        New-Item -ItemType Directory -Force -Path (Join-Path $cel $d) | Out-Null
+    }
+    $utf8 = New-Object Text.UTF8Encoding $false
+    $setenv = Join-Path $cel 'setenv.bat'
+    if (-not (Test-Path $setenv)) {
+        [IO.File]::WriteAllText($setenv, "@REM ECHO OFF`r`n@SET MEMORY_OPTS=-Xms128m -Xmx256m`r`n@SET TUNING_OPTS=`r`n", $utf8)
+    }
+    $opt = '-XX:+IgnoreUnrecognizedVMOptions --add-modules=java.se.ee'
+    $start = "@IF EXIST `"$cel/jre/bin/`" (SET ABEV_JAVA_HOME=`"$cel/jre/bin/`")`r`n" +
+             "@CALL .\setenv.bat`r`n" +
+             "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% -jar boot.jar`r`n" +
+             "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% %TUNING_OPTS% %RUN_OPTS% -DentityExpansionLimit=128000 -jar abevjava.jar cfg=cfg.enyk %1 %2 %3`r`n"
+    [IO.File]::WriteAllText((Join-Path $cel 'abevjava_start.bat'), $start, $utf8)
+}
+
+function Set-AnykPathCfg([string]$prog) {
+    $most = Read-PathCfg $PathCfg
+    if ($most -and ($most.TrimEnd('\') -ieq $prog) ) { return }
+    if ($most -and (Test-AnykDir $most)) { Warn "Az abevjavapath.cfg másik ÁNYK-ra mutat: $most. Nem írom át."; return }
+    $ertek = $prog.Substring(0, 2) + ($prog.Substring(2) -replace '\\', '\\')
+    # Ha a Windows mappa nem írható, a NAV-telepítő is a felhasználó .abevjava mappáját használja.
+    foreach ($f in $PathCfg, (Join-Path $Profil '.abevjava\abevjavapath.cfg')) {
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path $f) | Out-Null
+            [IO.File]::WriteAllText($f, "abevjava.path=$ertek`r`n", [Text.Encoding]::GetEncoding(28591))
+            Ok "abevjavapath.cfg: $f"
+            return
+        } catch { Warn "Nem tudom írni: $f" }
+    }
+}
+
+# A NAV indítószkriptje --add-modules=java.se.ee kapcsolóval indul. Ha a Java ezt nem fogadja el,
+# a kapcsolót kivesszük, különben az ÁNYK nem indul.
+function Repair-AddModules([string]$prog, [string]$javaw) {
+    $java = Join-Path (Split-Path $javaw) 'java.exe'
+    & cmd.exe /c "`"$java`" -XX:+IgnoreUnrecognizedVMOptions --add-modules=java.se.ee -version >nul 2>&1"
+    $rc = $LASTEXITCODE; $global:LASTEXITCODE = 0
+    if ($rc -eq 0) { return }
+    Warn 'Ez a Java nem ismeri a java.se.ee modult. Kiveszem a kapcsolót az indítószkriptekből.'
+    Get-ChildItem -LiteralPath $prog -Filter 'abevjava_*.bat' -File | ForEach-Object {
+        $t = [IO.File]::ReadAllText($_.FullName)
+        if ($t -match '--add-modules=java\.se\.ee') {
+            Copy-Item -LiteralPath $_.FullName -Destination "$($_.FullName).elotte-$Ido" -Force
+            [IO.File]::WriteAllText($_.FullName, ($t -replace ' ?--add-modules=java\.se\.ee', ''), (New-Object Text.UTF8Encoding $false))
+            Ok "Javítva: $($_.Name)"
+        }
+    }
 }
 
 function Test-AnykFut {
@@ -170,24 +290,23 @@ function Update-Enyk([string[]]$files, $map) {
 
 function New-Parancsikon([string]$prog, [string]$javaw) {
     $sh = New-Object -ComObject WScript.Shell
-    $indito = Get-ChildItem -LiteralPath $prog -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Extension -in '.bat', '.cmd', '.exe' -and $_.Name -match 'abevjava|start' -and $_.Name -notmatch 'uninst|install' } |
-              Select-Object -First 1
-    $jar = Get-ChildItem -LiteralPath $prog -Filter 'abevjava*.jar' -File | Sort-Object { $_.Name.Length } | Select-Object -First 1
+    $indito = Join-Path $prog 'abevjava_start.bat'
+    $jar = Join-Path $prog 'abevjava.jar'
     $helyek = @([Environment]::GetFolderPath('CommonDesktopDirectory'),
                 (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'ÁNYK'))
     foreach ($h in $helyek) {
         New-Item -ItemType Directory -Force -Path $h | Out-Null
         $l = $sh.CreateShortcut((Join-Path $h 'ÁNYK.lnk'))
-        if ($indito) {
-            $l.TargetPath = $indito.FullName
+        if (Test-Path $indito) {
+            $l.TargetPath = $indito
+            $l.WindowStyle = 7
         } else {
             $l.TargetPath = $javaw
-            $l.Arguments = "-jar `"$($jar.FullName)`""
+            $l.Arguments = "-jar `"$jar`" cfg=cfg.enyk"
         }
         $l.WorkingDirectory = $prog
-        $ico = Get-ChildItem -LiteralPath $prog -Filter '*.ico' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($ico) { $l.IconLocation = $ico.FullName }
+        if (Test-Path "$prog\abevjava.ico") { $l.IconLocation = "$prog\abevjava.ico" }
+        $l.Description = 'Általános Nyomtatványkitöltő'
         $l.Save()
         Ok "Parancsikon: $h\ÁNYK.lnk"
     }
@@ -203,9 +322,23 @@ function Read-Manifest([string]$zip) {
     } finally { $z.Dispose() }
 }
 
-if ($Mentes -eq $Visszatoltes) {
+function Invoke-Emelt([string[]]$modArgs) {
+    Info 'Rendszergazdai jog kell (Java/ÁNYK telepítés). Újraindítás emelt joggal...'
+    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"") + $modArgs +
+         @('-Profil', "`"$Profil`"", '-Felhasznalo', "`"$Felhasznalo`"", '-JavaWingetId', $JavaWingetId, '-Szunet')
+    if ($ProgramDir)       { $a += '-ProgramDir', "`"$ProgramDir`"" }
+    if ($NincsParancsikon) { $a += '-NincsParancsikon' }
+    $p = Start-Process powershell.exe -Verb RunAs -ArgumentList $a -Wait -PassThru
+    exit $p.ExitCode
+}
+
+if ($Konyvtar) { return }
+
+if ((@($Mentes, $Telepites, $Visszatoltes) | Where-Object { $_ }).Count -ne 1) {
+    Write-Host "ÁNYK átköltöztetés $Verzio"
     Write-Host 'Használat:'
     Write-Host '  .\ANYK-Atkoltozes.ps1 -Mentes        (a régi gépen)'
+    Write-Host '  .\ANYK-Atkoltozes.ps1 -Telepites     (az új gépen: Java + ÁNYK, ha hiányzik)'
     Write-Host '  .\ANYK-Atkoltozes.ps1 -Visszatoltes  (az új gépen)'
     Vege 2
 }
@@ -262,10 +395,11 @@ if ($Mentes) {
         }
         $man = [pscustomobject]@{
             Formatum    = 1
+            Verzio      = $Verzio
             Datum       = (Get-Date).ToString('s')
             Gep         = $env:COMPUTERNAME
-            Felhasznalo = $env:USERNAME
-            Profil      = $Profil.TrimEnd('\')
+            Felhasznalo = $Felhasznalo
+            Profil      = $Profil
             ProgramDir  = $prog
             Tetelek     = $tetelek
         }
@@ -290,7 +424,45 @@ if ($Mentes) {
     Write-Host ''
     Ok "Kész. $zipDb fájl, $mb MB."
     Ok "Mentés: $zip"
-    Write-Host 'Vidd át az új gépre a ZIP-et és ezt a scriptet, ott futtasd: ANYK-Visszatoltes.cmd'
+    Vege 0
+}
+
+# ======================================================================
+# TELEPÍTÉS (Java + ÁNYK, ha hiányzik)
+# ======================================================================
+if ($Telepites) {
+    $prog  = Find-AnykDir $ProgramDir
+    $javaw = Find-Javaw $prog
+    $celProg = if ($prog) { $prog } elseif ($ProgramDir) { $ProgramDir } else { $AnykAlapDir }
+    if ((-not $javaw -or -not $prog) -and -not (Test-Admin)) { Invoke-Emelt @('-Telepites') }
+
+    if ($javaw) { Ok "Java megvan: $javaw" }
+    else {
+        Warn 'Nincs Java a gépen.'
+        $javaw = Install-Java
+        if (-not $javaw) { Fail 'A Java telepítése nem sikerült. Telepíts kézzel (adoptium.net, Temurin JRE), aztán próbáld újra.' }
+        Ok "Java telepítve: $javaw"
+    }
+
+    if ($prog) {
+        Ok "ÁNYK megvan: $prog"
+    } else {
+        Warn 'Nincs ÁNYK a gépen.'
+        try {
+            Install-AnykNav $celProg
+            $prog = $celProg
+            Ok "ÁNYK telepítve: $prog"
+            Set-AnykPathCfg $prog
+            if (-not $NincsParancsikon) { New-Parancsikon $prog $javaw }
+        } catch {
+            Warn "A NAV-telepítő letöltése vagy kibontása nem sikerült: $($_.Exception.Message)"
+            Warn 'Az ÁNYK a visszatöltéskor a mentésből települ.'
+            Vege 3
+        }
+    }
+    Repair-AddModules $prog $javaw
+    Write-Host ''
+    Ok 'A gép készen áll a visszatöltésre.'
     Vege 0
 }
 
@@ -309,8 +481,7 @@ if (-not $Telepito) {
     if (Test-Path $t) { $Telepito = $t }
 }
 
-$man = Read-Manifest $Archiv
-$Profil = $Profil.TrimEnd('\')
+try { $man = Read-Manifest $Archiv } catch { Fail $_.Exception.Message }
 Info "Mentés forrása: $($man.Gep) / $($man.Felhasznalo), készült: $($man.Datum)"
 
 function Map-Ut([string]$p) {
@@ -318,21 +489,16 @@ function Map-Ut([string]$p) {
     return $p
 }
 
-$javaw = Find-Javaw
 $prog  = Find-AnykDir $ProgramDir
+$javaw = Find-Javaw $prog
 $celProg = if ($prog) { $prog } elseif ($ProgramDir) { $ProgramDir } else { Map-Ut $man.ProgramDir }
 $vedett = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:windir) | Where-Object { $_ }
 $kellAdmin = (-not $javaw) -or [bool]($vedett | Where-Object { Test-Under $celProg $_ })
 
 if ($kellAdmin -and -not (Test-Admin)) {
-    Info 'Rendszergazdai jog kell (Java/ÁNYK telepítés). Újraindítás emelt joggal...'
-    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Visszatoltes',
-           '-Archiv', "`"$Archiv`"", '-Profil', "`"$Profil`"", '-JavaWingetId', $JavaWingetId, '-Szunet')
-    if ($Telepito)         { $a += '-Telepito', "`"$Telepito`"" }
-    if ($ProgramDir)       { $a += '-ProgramDir', "`"$ProgramDir`"" }
-    if ($NincsParancsikon) { $a += '-NincsParancsikon' }
-    $p = Start-Process powershell.exe -Verb RunAs -ArgumentList $a -Wait -PassThru
-    exit $p.ExitCode
+    $a = @('-Visszatoltes', '-Archiv', "`"$Archiv`"")
+    if ($Telepito) { $a += '-Telepito', "`"$Telepito`"" }
+    Invoke-Emelt $a
 }
 
 if (Test-AnykFut) { Fail 'Az ÁNYK most fut. Zárd be, aztán indítsd újra.' }
@@ -341,13 +507,8 @@ if (Test-AnykFut) { Fail 'Az ÁNYK most fut. Zárd be, aztán indítsd újra.' }
 if ($javaw) {
     Ok "Java megvan: $javaw"
 } else {
-    Info "Nincs Java. Telepítés: $JavaWingetId"
-    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-        Fail 'Nincs winget. Telepíts kézzel Javát (pl. adoptium.net, Temurin JRE), aztán futtasd újra.'
-    }
-    & winget.exe install --id $JavaWingetId -e --silent --accept-package-agreements --accept-source-agreements
-    $global:LASTEXITCODE = 0
-    $javaw = Find-Javaw
+    Warn 'Nincs Java a gépen.'
+    $javaw = Install-Java
     if (-not $javaw) { Fail 'A Java telepítése nem sikerült. Telepítsd kézzel, aztán futtasd újra.' }
     Ok "Java telepítve: $javaw"
 }
@@ -368,7 +529,7 @@ try {
         $java = Join-Path (Split-Path $javaw) 'java.exe'
         Start-Process -FilePath $java -ArgumentList '-jar', "`"$Telepito`"" -Wait
         $prog = Find-AnykDir $ProgramDir
-        if ($prog) { Ok "ÁNYK telepítve: $prog" } else { Warn 'A telepítő után sem találom az ÁNYK-t. A mentett programmappát használom.' }
+        if (-not $prog) { Warn 'A telepítő után sem találom az ÁNYK-t. A mentett programmappát használom.' }
     }
     if ($prog) {
         Ok "ÁNYK telepítve: $prog"
@@ -383,6 +544,7 @@ try {
         Ok "ÁNYK telepítve: $prog"
     }
     if ($mostTelepitett -and -not $NincsParancsikon) { New-Parancsikon $prog $javaw }
+    Set-AnykPathCfg $prog
 
     # --- 4. Beállítások és adatok ---
     $map = New-Object System.Collections.ArrayList
@@ -409,16 +571,28 @@ try {
     }
     if ($man.Profil -ine $Profil) { [void]$map.Add(@($man.Profil, $Profil)) }
 
+    # Az ÁNYK a beállítást <felhasználónév>.enyk néven keresi.
+    $beall = Join-Path $Profil '.abevjava'
+    $regiEnyk = Join-Path $beall "$($man.Felhasznalo).enyk"
+    $ujEnyk = Join-Path $beall "$Felhasznalo.enyk"
+    if ($man.Felhasznalo -ine $Felhasznalo -and (Test-Path $regiEnyk)) {
+        if (Test-Path $ujEnyk) { Copy-Item $ujEnyk "$ujEnyk.elotte-$Ido" -Force }
+        Copy-Item $regiEnyk $ujEnyk -Force
+        Ok "Beállítás átnevezve az új felhasználóra: $ujEnyk"
+    }
+
     # --- 5. Útvonalak átírása ---
     $map = @($map | Sort-Object { $_[0].Length } -Descending)
     $enyk = @()
-    foreach ($d in @((Join-Path $Profil '.abevjava'), $prog)) {
+    foreach ($d in @($beall, $prog)) {
         if (Test-Path -LiteralPath $d) {
             $enyk += Get-ChildItem -LiteralPath $d -Recurse -Filter '*.enyk' -File -ErrorAction SilentlyContinue |
                      Select-Object -ExpandProperty FullName
         }
     }
     if ($enyk) { Update-Enyk $enyk $map }
+    $javaw = Find-Javaw $prog
+    Repair-AddModules $prog $javaw
 
     # --- 6. Ellenőrzés ---
     Write-Host ''
@@ -429,6 +603,7 @@ try {
     $ver = & cmd.exe /c "`"$java`" -version 2>&1" | Select-Object -First 1
     $global:LASTEXITCODE = 0
     if ($ver) { Ok "Java: $ver" } else { Warn 'A Java nem válaszol.'; $hiba++ }
+    if (Test-Path $ujEnyk) { Ok "Beállítás: $ujEnyk" } else { Warn "Nincs felhasználói beállítás: $ujEnyk. Az ÁNYK első indításkor kéri."; }
     foreach ($e in $eredmeny) {
         if ($e.Van -ge $e.Vart) { Ok "$($e.Ut): $($e.Van) fájl" }
         else { Warn "$($e.Ut): csak $($e.Van) fájl a várt $($e.Vart) helyett"; $hiba++ }
@@ -438,4 +613,5 @@ try {
 } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
+if ($hiba) { Vege 4 }
 Vege 0
