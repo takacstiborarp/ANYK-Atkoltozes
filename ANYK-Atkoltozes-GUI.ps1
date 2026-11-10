@@ -2,6 +2,7 @@
 <#
 .SYNOPSIS
     ÁNYK átköltöztetés, grafikus felület. Az ANYK-Atkoltozes.ps1-et hívja.
+    Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886, takacstibor@arphungary.hu
 #>
 param(
     [ValidateSet('', 'Vissza')][string]$Mod = '',
@@ -54,20 +55,38 @@ $Betu      = New-Object Drawing.Font('Segoe UI', 10)
 $BetuCim   = New-Object Drawing.Font('Segoe UI Semibold', 16)
 $BetuAlcim = New-Object Drawing.Font('Segoe UI Semibold', 11)
 $BetuNaplo = New-Object Drawing.Font('Consolas', 9)
-$Hatter    = [Drawing.Color]::FromArgb(250, 250, 250)
-$Szurke    = [Drawing.Color]::FromArgb(110, 110, 115)
-$Narancs   = [Drawing.Color]::FromArgb(230, 120, 30)
-$Zold      = [Drawing.Color]::FromArgb(40, 140, 70)
-$Piros     = [Drawing.Color]::FromArgb(200, 50, 40)
+# ARP Hungary arculat (ugyanaz a paletta, mint az ARP-jelentéseken)
+$Hatter    = [Drawing.Color]::White
+$Teal      = [Drawing.ColorTranslator]::FromHtml('#156366')
+$Sotet     = [Drawing.ColorTranslator]::FromHtml('#0A4343')
+$Tinta     = [Drawing.ColorTranslator]::FromHtml('#1B2A30')
+$Szurke    = [Drawing.ColorTranslator]::FromHtml('#5C6B73')
+$Vonal     = [Drawing.ColorTranslator]::FromHtml('#C9D3D7')
+$Halvany   = [Drawing.ColorTranslator]::FromHtml('#F2F7F7')
+$Zold      = $Teal
+$Narancs   = [Drawing.ColorTranslator]::FromHtml('#A8681B')
+$Piros     = [Drawing.ColorTranslator]::FromHtml('#8A2B2B')
+$Keszitette = 'Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886'
+$Email      = 'takacstibor@arphungary.hu'
+$BetuLab    = New-Object Drawing.Font('Segoe UI', 8.5)
+
+function Find-Eszkoz([string]$nev) {
+    foreach ($p in (Join-Path $PSScriptRoot $nev), (Join-Path $PSScriptRoot "installer\$nev")) {
+        if (Test-Path $p) { return $p }
+    }
+    $null
+}
 
 function New-Gomb([string]$szoveg, [int]$x, [int]$y, [int]$w = 120, [switch]$Fo) {
     $b = New-Object Windows.Forms.Button
     $b.Text = $szoveg; $b.Location = "$x,$y"; $b.Size = "$w,32"; $b.Font = $Betu
     $b.FlatStyle = 'Flat'; $b.Cursor = 'Hand'
     if ($Fo) {
-        $b.BackColor = $Narancs; $b.ForeColor = 'White'; $b.FlatAppearance.BorderSize = 0
+        $b.BackColor = $Teal; $b.ForeColor = 'White'; $b.FlatAppearance.BorderSize = 0
+        $b.FlatAppearance.MouseOverBackColor = $Sotet
     } else {
-        $b.BackColor = 'White'; $b.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(200, 200, 205)
+        $b.BackColor = 'White'; $b.ForeColor = $Tinta; $b.FlatAppearance.BorderColor = $Vonal
+        $b.FlatAppearance.MouseOverBackColor = $Halvany
     }
     $b
 }
@@ -84,36 +103,72 @@ function New-Mezo([int]$x, [int]$y, [int]$w = 440) {
 }
 function New-Panel {
     $p = New-Object Windows.Forms.Panel
-    $p.Location = '0,0'; $p.Size = '640,330'; $p.Visible = $false
+    $p.Location = '0,76'; $p.Size = '640,330'; $p.Visible = $false
     $form.Controls.Add($p)
     $p
 }
 
 $form = New-Object Windows.Forms.Form
 $form.Text = 'ÁNYK átköltöztetés'
-$form.ClientSize = '640,560'
+$form.ClientSize = '640,676'
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
 $form.BackColor = $Hatter
+$form.ForeColor = $Tinta
 $form.Font = $Betu
-foreach ($ikon in (Join-Path $PSScriptRoot 'app.ico'), (Join-Path $PSScriptRoot 'installer\app.ico')) {
-    if (Test-Path $ikon) { $form.Icon = New-Object Drawing.Icon $ikon; break }
-}
+$ikon = Find-Eszkoz 'app.ico'
+if ($ikon) { $form.Icon = New-Object Drawing.Icon $ikon }
 
-# Napló és állapotsor (minden lépésnél látszik)
+# --- Fejléc: ARP logó, cégnév, programnév, alatta egyenes teal csík ---
+$logo = Find-Eszkoz 'arp_logo.png'
+if ($logo) {
+    $pb = New-Object Windows.Forms.PictureBox
+    $pb.Image = [Drawing.Image]::FromFile($logo)
+    $pb.SizeMode = 'Zoom'; $pb.Location = '24,16'; $pb.Size = '44,44'
+    $form.Controls.Add($pb)
+}
+$form.Controls.Add((New-Cimke 'ARP Hungary' 80 15 400 (New-Object Drawing.Font('Segoe UI Semibold', 13)) $Sotet))
+$form.Controls.Add((New-Cimke 'ÁNYK átköltöztetés' 81 40 400 $Betu $Szurke))
+$csik = New-Object Windows.Forms.Panel
+$csik.Location = '0,74'; $csik.Size = '640,2'; $csik.BackColor = $Teal
+$form.Controls.Add($csik)
+
+# --- Napló és állapotsor (a mentés és a visszatöltés lapon) ---
 $naplo = New-Object Windows.Forms.TextBox
 $naplo.Multiline = $true; $naplo.ReadOnly = $true; $naplo.ScrollBars = 'Vertical'
-$naplo.Location = '24,340'; $naplo.Size = '592,170'; $naplo.Font = $BetuNaplo
-$naplo.BackColor = 'White'; $naplo.BorderStyle = 'FixedSingle'
+$naplo.Location = '24,412'; $naplo.Size = '592,160'; $naplo.Font = $BetuNaplo
+$naplo.BackColor = $Halvany; $naplo.ForeColor = $Tinta; $naplo.BorderStyle = 'FixedSingle'
 $form.Controls.Add($naplo)
 
-$sav = New-Object Windows.Forms.ProgressBar
-$sav.Location = '24,520'; $sav.Size = '592,8'; $sav.Style = 'Marquee'; $sav.MarqueeAnimationSpeed = 0
+# Folyamatjelző: egyenes sáv, benne egy mozgó teal blokk (a Windows zöld sávja helyett).
+$sav = New-Object Windows.Forms.Panel
+$sav.Location = '24,580'; $sav.Size = '592,3'; $sav.BackColor = $Halvany
+$savBlokk = New-Object Windows.Forms.Panel
+$savBlokk.Size = '120,3'; $savBlokk.BackColor = $Teal; $savBlokk.Visible = $false
+$sav.Controls.Add($savBlokk)
 $form.Controls.Add($sav)
+$savIdozito = New-Object Windows.Forms.Timer
+$savIdozito.Interval = 25
+$savIdozito.Add_Tick({
+    $x = $savBlokk.Left + 6
+    if ($x -gt $sav.Width) { $x = -$savBlokk.Width }
+    $savBlokk.Left = $x
+})
+function Start-Sav { $savBlokk.Left = -$savBlokk.Width; $savBlokk.Visible = $true; $savIdozito.Start() }
+function Stop-Sav  { $savIdozito.Stop(); $savBlokk.Visible = $false }
 
-$allapot = New-Cimke '' 24 532 592 $Betu $Szurke
+$allapot = New-Cimke '' 24 590 592 $Betu $Szurke
 $form.Controls.Add($allapot)
+
+# --- Lábléc: Készítette sor ---
+$labVonal = New-Object Windows.Forms.Panel
+$labVonal.Location = '24,636'; $labVonal.Size = '592,1'; $labVonal.BackColor = $Vonal
+$form.Controls.Add($labVonal)
+$form.Controls.Add((New-Cimke $Keszitette 24 644 400 $BetuLab $Szurke))
+$lEmail = New-Cimke $Email 416 644 200 $BetuLab $Szurke
+$lEmail.TextAlign = 'TopRight'
+$form.Controls.Add($lEmail)
 
 function Naplo([string]$s) { $naplo.AppendText($s + "`r`n") }
 
@@ -132,7 +187,7 @@ $idozito.Add_Tick({
         $kod = $script:futo.P.ExitCode
         $script:futo = $null
         $idozito.Stop()
-        $sav.MarqueeAnimationSpeed = 0; $sav.Style = 'Blocks'; $sav.Value = 0
+        Stop-Sav
         $form.UseWaitCursor = $false
         if ($script:utana) { & $script:utana $kod }
     }
@@ -144,7 +199,7 @@ function Start-Feladat([string[]]$argumentumok, [scriptblock]$utana) {
          @('-Profil', "`"$Profil`"", '-Felhasznalo', "`"$Felhasznalo`"", '-Gui')
     $script:utana = $utana
     $script:futo = New-Object AnykFuttato
-    $sav.Style = 'Marquee'; $sav.MarqueeAnimationSpeed = 30
+    Start-Sav
     $form.UseWaitCursor = $true
     $script:futo.Indit("$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe", ($a -join ' '))
     $idozito.Start()
@@ -154,8 +209,8 @@ function Start-Feladat([string[]]$argumentumok, [scriptblock]$utana) {
 # 1. Kezdőlap
 # ======================================================================
 $pStart = New-Panel
-$pStart.Controls.Add((New-Cimke 'ÁNYK átköltöztetés' 24 24 560 $BetuCim))
-$pStart.Controls.Add((New-Cimke 'Mit szeretnél csinálni ezen a gépen?' 24 64 560 $Betu $Szurke))
+$pStart.Controls.Add((New-Cimke 'Mit szeretnél csinálni?' 24 24 560 $BetuCim))
+$pStart.Controls.Add((New-Cimke 'Mentés a régi gépen, visszatöltés az új gépen.' 24 64 560 $Betu $Szurke))
 
 $bMentesValaszt = New-Gomb 'Mentés' 24 110 280 -Fo
 $bMentesValaszt.Height = 56

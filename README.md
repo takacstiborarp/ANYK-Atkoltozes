@@ -1,5 +1,7 @@
 # ÁNYK átköltöztetés
 
+Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886, takacstibor@arphungary.hu
+
 Az ÁNYK (abevjava) programot, a letöltött nyomtatványokat, a beállításokat és a mentett adatokat viszi át egyik Windows gépről a másikra.
 
 ## MSI (ajánlott)
@@ -54,4 +56,8 @@ Kell: WiX v5 (`dotnet tool install --global wix`) és `wix extension add -g WixT
 powershell -ExecutionPolicy Bypass -File .\build-msi.ps1
 ```
 
-A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatásnál emeld. Az ikont és a telepítő leírását a build generálja.
+A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatásnál emeld. Az ikont, a telepítő képeit (`dialog.bmp`, `banner.bmp`), a kis logót és a leírást a build generálja az `installerrp_logo.png`-ből.
+
+## Arculat
+
+ARP Hungary: teal logó, paletta `#156366` (fő szín), `#0A4343`, `#5C6B73` (szöveg), `#C9D3D7` (vonal), `#F2F7F7` (háttér), figyelmeztetés `#A8681B`, hiba `#8A2B2B`. Szögletes elemek, egyenes vonalak. A "Készítette" sor a felület láblécében, a telepítő leírásában és befejező lapján, valamint a Programok és szolgáltatások adatai között is szerepel.

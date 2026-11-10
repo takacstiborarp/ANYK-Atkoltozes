@@ -2,6 +2,7 @@
 <#
 .SYNOPSIS
     ÁNYK (abevjava) átköltöztetése egyik gépről a másikra.
+    Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886, takacstibor@arphungary.hu
 
 .DESCRIPTION
     Mentés (régi gép):
@@ -49,7 +50,7 @@ param(
     [switch]$Konyvtar
 )
 
-$Verzio = '1.1.0'
+$Verzio = '1.2.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -335,7 +336,8 @@ function Invoke-Emelt([string[]]$modArgs) {
 if ($Konyvtar) { return }
 
 if ((@($Mentes, $Telepites, $Visszatoltes) | Where-Object { $_ }).Count -ne 1) {
-    Write-Host "ÁNYK átköltöztetés $Verzio"
+    Write-Host "ÁNYK átköltöztetés $Verzio - ARP Hungary Kft."
+    Write-Host 'Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886, takacstibor@arphungary.hu'
     Write-Host 'Használat:'
     Write-Host '  .\ANYK-Atkoltozes.ps1 -Mentes        (a régi gépen)'
     Write-Host '  .\ANYK-Atkoltozes.ps1 -Telepites     (az új gépen: Java + ÁNYK, ha hiányzik)'

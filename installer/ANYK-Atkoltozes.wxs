@@ -9,7 +9,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package Name="ÁNYK átköltöztetés"
-           Manufacturer="ARP Hungary"
+           Manufacturer="ARP Hungary Kft."
            Version="$(var.Verzio)"
            UpgradeCode="5C904CCC-79B4-46F4-B267-43B559E3230C"
            Scope="perMachine"
@@ -21,7 +21,11 @@
 
     <Icon Id="app.ico" SourceFile="$(var.Gyoker)\installer\app.ico" />
     <Property Id="ARPPRODUCTICON" Value="app.ico" />
-    <Property Id="ARPCOMMENTS" Value="ÁNYK (abevjava) mentése és visszatöltése gépcseréhez." />
+    <Property Id="ARPCOMMENTS" Value="ÁNYK (abevjava) mentése és visszatöltése gépcseréhez. Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886" />
+    <Property Id="ARPCONTACT" Value="Takács Tibor, takacstibor@arphungary.hu" />
+    <Property Id="ARPHELPTELEPHONE" Value="+36 30 526-9886" />
+    <Property Id="ARPURLINFOABOUT" Value="https://arphungary.hu" />
+    <Property Id="ARPHELPLINK" Value="https://arphungary.hu" />
 
     <SetProperty Id="PSEXE" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe" Before="CostFinalize" Sequence="both" />
 
@@ -32,6 +36,9 @@
           <File Id="Gui" Source="$(var.Gyoker)\ANYK-Atkoltozes-GUI.ps1" />
           <File Id="Leiras" Source="$(var.Gyoker)\README.md" />
           <File Id="Ikon" Source="$(var.Gyoker)\installer\app.ico" />
+        </Component>
+        <Component Id="Arculat" Guid="4F2A7C90-1E6B-4D3A-9B85-7C0E2D5A1F63">
+          <File Id="Logo" Source="$(var.Gyoker)\installer\arp_logo_128.png" Name="arp_logo.png" KeyPath="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -73,7 +80,10 @@
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="ÁNYK átköltöztetés indítása most" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="Készítette: Takács Tibor - ARP Hungary Kft. +36 30 526-9886, takacstibor@arphungary.hu" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.Gyoker)\installer\leiras.rtf" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(var.Gyoker)\installer\dialog.bmp" />
+    <WixVariable Id="WixUIBannerBmp" Value="$(var.Gyoker)\installer\banner.bmp" />
 
     <ui:WixUI Id="WixUI_Minimal" />
     <UI>

@@ -2,3 +2,6 @@ dist/
 installer/app.ico
 installer/leiras.rtf
 *.wixpdb
+installer/dialog.bmp
+installer/banner.bmp
+installer/arp_logo_128.png
