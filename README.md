@@ -61,3 +61,9 @@ A verzió az `ANYK-Atkoltozes.ps1` `$Verzio` sorából jön. Minden változtatá
 ## Arculat
 
 ARP Hungary: teal logó, paletta `#156366` (fő szín), `#0A4343`, `#5C6B73` (szöveg), `#C9D3D7` (vonal), `#F2F7F7` (háttér), figyelmeztetés `#A8681B`, hiba `#8A2B2B`. Szögletes elemek, egyenes vonalak. A "Készítette" sor a felület láblécében, a telepítő leírásában és befejező lapján, valamint a Programok és szolgáltatások adatai között is szerepel.
+
+## Licenc
+
+MIT, lásd a [LICENSE](LICENSE) fájlt. A kód szabadon használható, módosítható és továbbadható, a szerzői jogi megjegyzés megtartásával. Garancia nélkül.
+
+Az ARP Hungary logó és név nem része a licencnek, azok az ARP Hungary Kft. tulajdonában maradnak. A program által letöltött ÁNYK (NAV) és Java (Eclipse Temurin) a saját licencfeltételeik szerint használható.
