@@ -22,28 +22,33 @@ Az MSI magától nem tud fájlválasztót mutatni (ez a Windows Installer korlá
 3. Új gép: futtasd az `ANYK-Visszatoltes.cmd`-t. Rendszergazdai jogot kér.
 
 ```
-.\ANYK-Atkoltozes.ps1 -Mentes [-Cel E:\] [-ExtraPath 'D:\Valami'] [-ProgramDir 'C:\...\abevjava']
+.\ANYK-Atkoltozes.ps1 -Mentes [-Cel E:\] [-ExtraPath 'D:\Valami'] [-ProgramDir 'C:\...\abevjava'] [-NagyMappa] [-NagyMappaMB 1024]
 .\ANYK-Atkoltozes.ps1 -Telepites [-ProgramDir <cél>]
 .\ANYK-Atkoltozes.ps1 -Visszatoltes [-Archiv <zip>] [-Telepito <abevjava_install.jar>] [-ProgramDir <cél>] [-NincsParancsikon]
 ```
 
-Kilépési kódok: 0 rendben, 1 hiba, 3 az ÁNYK nem települt a NAV-ról (a visszatöltés a mentésből telepíti), 4 kész, de figyelmeztetéssel.
+Kilépési kódok: 0 rendben, 1 hiba, 3 az ÁNYK nem települt a NAV-ról (a visszatöltés a mentésből telepíti), 4 kész, de figyelmeztetéssel (mentésnél például kihagyott nagy mappa).
 
 ## Mit ment
 
 - az ÁNYK programmappáját a letöltött nyomtatványokkal (enélkül a régi mentések nem nyílnak meg),
 - `%USERPROFILE%\.abevjava` (beállítások, `<felhasználó>.enyk`),
 - `%USERPROFILE%\abevjava` (mentések, KR-fájlok, napló),
-- a beállításokban hivatkozott egyéb mappákat (pl. `D:\ANYK_mentesek`).
+- a beállításokban hivatkozott egyéb mappákat (pl. `D:\ANYK_mentesek`),
+- az elektronikus feladás (KR) mappáját, ha máshol van (`prop.usr.krdir`, `KRDIR` környezeti változó).
+
+Ha egy hivatkozott mappa 1 GB-nál nagyobb, vagy személyes gyűjtőmappa (Dokumentumok, Asztal, Letöltések, OneDrive), nem menti magától: parancssorban rákérdez, a felületen kihagyja és figyelmeztet. A felületen a „Nagy mappák is” jelölőnégyzettel, parancssorban a `-NagyMappa` kapcsolóval kerül bele. A `-ExtraPath`-szal megadott mappa mindig bekerül. A mentés előtt ellenőrzi, van-e elég hely a TEMP és a cél meghajtóján.
 
 ## Mit csinál a visszatöltés
 
-- **Java nincs:** Eclipse Temurin 21 JRE wingettel, ha nincs winget, az adoptium.net MSI-jével.
-- **ÁNYK nincs:** letölti a hivatalos telepítőt a nav.gov.hu-ról, és úgy bontja ki, ahogy a NAV telepítője: `Program Files\abevjava`, `abevjava_start.bat`, `setenv.bat`, `%windir%\abevjavapath.cfg`, parancsikon. Ha a NAV nem érhető el, a mentett programmappát másolja vissza.
+- **Java nincs:** Eclipse Temurin 21 JRE wingettel, ha nincs winget, az adoptium.net MSI-jével (csak érvényes digitális aláírással telepíti).
+- **ÁNYK nincs:** letölti a hivatalos telepítőt a nav.gov.hu-ról, és úgy bontja ki, ahogy a NAV telepítője: `Program Files\abevjava`, mind a 8 indítószkript (`abevjava_start.bat`, `_start_open`, `_start_import`, `_instupdate`…), `setenv.bat`, a `gen_*.vbs` segédfájlok, `%windir%\abevjavapath.cfg`, parancsikon. Ha a NAV nem érhető el, a mentett programmappát másolja vissza.
 - **ÁNYK van:** csak a hiányzó nyomtatványokat pótolja, újabb fájlt nem ír felül.
 - **Felhasználói adatok:** visszatölti őket. Ha a célmappában már van valami, előbb `<mappa>.elotte-<dátum>` másolatot készít.
-- **Más felhasználónév:** a `<régi>.enyk` fájlt átmásolja `<új>.enyk` néven. Az útvonalakat átírja az `.enyk` fájlokban, az eredetit megtartja.
+- **Más felhasználónév:** a `<régi>.enyk` fájlt átmásolja `<új>.enyk` néven. Az útvonalakat egy menetben átírja az `.enyk` fájlokban és a `.abevjava\abevjavapath.cfg`-ben, az eredetit megtartja. (Egy menetben, hogy például a `Tibor` → `Tibor.Takacs` csere ne legyen `Tibor.Takacs.Takacs`.)
+- **KR-mappa:** a `KRDIR` környezeti változót az új helyre állítja annak a felhasználónak, akinek az adatai visszakerültek.
 - **Java-kapcsoló:** a NAV indítószkriptje `--add-modules=java.se.ee` kapcsolóval indul. Ha a gépen lévő Java ezt nem fogadja el, a script kiveszi a kapcsolót, különben az ÁNYK nem indulna.
+- **Java a PATH-on kívül:** ha a Java nincs a PATH-ban, a helyét beírja a `setenv.bat`-ba, különben az indítószkript nem találná.
 - **A végén ellenőriz:** program, Java, beállítás, fájlszámok.
 
 A felhasználói adatok annak a felhasználónak a profiljába kerülnek, aki a programot elindítja (az emelt jogú újraindítás is ezt a profilt használja).

@@ -47,10 +47,12 @@ param(
     [switch]$NincsParancsikon,
     [switch]$Szunet,
     [switch]$Gui,
-    [switch]$Konyvtar
+    [switch]$Konyvtar,
+    [switch]$NagyMappa,
+    [int]$NagyMappaMB = 1024
 )
 
-$Verzio = '1.2.0'
+$Verzio = '1.3.0'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -140,6 +142,14 @@ function Install-Java {
     }
     $msi = Join-Path $env:TEMP "temurin-jre-$Ido.msi"
     Invoke-WebRequest -Uri $AdoptiumMsiUrl -OutFile $msi -UseBasicParsing
+    # Csak érvényes digitális aláírású telepítőt futtatunk.
+    $sig = Get-AuthenticodeSignature -FilePath $msi
+    if ($sig.Status -ne 'Valid') {
+        Remove-Item $msi -Force -ErrorAction SilentlyContinue
+        Warn "A letöltött Java-telepítő aláírása nem érvényes ($($sig.Status)). Nem telepítem."
+        return $null
+    }
+    Info "Aláírás rendben: $($sig.SignerCertificate.Subject)"
     Info 'Java telepítése (Temurin JRE)...'
     $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart',
          'ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJarFileRunWith' -Wait -PassThru
@@ -161,8 +171,11 @@ function Install-AnykNav([string]$cel) {
         }
         Info "Kibontás ide: $cel"
         foreach ($e in $z.Entries) {
-            if (-not $e.FullName.StartsWith('application/') -or $e.FullName.EndsWith('/')) { continue }
-            $dest = Join-Path $cel ($e.FullName.Substring(12) -replace '/', '\')
+            if ($e.FullName.EndsWith('/')) { continue }
+            if ($e.FullName.StartsWith('application/')) { $rel = $e.FullName.Substring(12) }
+            elseif ($e.FullName.StartsWith('os/install/win/')) { $rel = $e.FullName.Substring(15) }
+            else { continue }
+            $dest = Join-Path $cel ($rel -replace '/', '\')
             New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
             [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
         }
@@ -176,12 +189,23 @@ function Install-AnykNav([string]$cel) {
     if (-not (Test-Path $setenv)) {
         [IO.File]::WriteAllText($setenv, "@REM ECHO OFF`r`n@SET MEMORY_OPTS=-Xms128m -Xmx256m`r`n@SET TUNING_OPTS=`r`n", $utf8)
     }
-    $opt = '-XX:+IgnoreUnrecognizedVMOptions --add-modules=java.se.ee'
-    $start = "@IF EXIST `"$cel/jre/bin/`" (SET ABEV_JAVA_HOME=`"$cel/jre/bin/`")`r`n" +
-             "@CALL .\setenv.bat`r`n" +
-             "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% -jar boot.jar`r`n" +
-             "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% %TUNING_OPTS% %RUN_OPTS% -DentityExpansionLimit=128000 -jar abevjava.jar cfg=cfg.enyk %1 %2 %3`r`n"
-    [IO.File]::WriteAllText((Join-Path $cel 'abevjava_start.bat'), $start, $utf8)
+    # Ugyanazok az indítószkriptek, mint a NAV jarinstaller.xml-jében (Windows rész).
+    $opt  = '-XX:+IgnoreUnrecognizedVMOptions --add-modules=java.se.ee'
+    $boot = "@CALL .\setenv.bat`r`n@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% -jar boot.jar`r`n"
+    $hl   = "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% %TUNING_OPTS% -Djava.awt.headless=true -DentityExpansionLimit=128000 -jar abevjava.jar cfg=cfg.enyk"
+    $bat = [ordered]@{
+        'abevjava_start'       = "@IF EXIST `"$cel/jre/bin/`" (SET ABEV_JAVA_HOME=`"$cel/jre/bin/`")`r`n" + $boot +
+                                 "@%ABEV_JAVA_HOME%java $opt %MEMORY_OPTS% %TUNING_OPTS% %RUN_OPTS% -DentityExpansionLimit=128000 -jar abevjava.jar cfg=cfg.enyk %1 %2 %3`r`n"
+        'abevjava_instnew'     = $boot + "$hl cmd:`"instnew.silent`"`r`n"
+        'abevjava_instupdate'  = $boot + "$hl cmd:`"instupgrade.silent`"`r`n"
+        'abevjava_replicate'   = $boot + "$hl cmd:`"replicate.silent`"`r`n"
+        'abevjava_start_new'   = "call abevjava_start cmd:`"file.new %1`"`r`n"
+        'abevjava_start_open'  = "call abevjava_start cmd:`"file.open %1`"`r`n"
+        'abevjava_start_test'  = "call abevjava_start_new %1`r`n"
+    }
+    foreach ($n in $bat.Keys) { [IO.File]::WriteAllText((Join-Path $cel "$n.bat"), $bat[$n], $utf8) }
+    [IO.File]::WriteAllText((Join-Path $cel 'abevjava_start_import.bat'),
+        "@cscript `"$cel/gen_abevjava_import.vbs`" %1 `"$cel/abevjava.jar`"`r`n", [Text.Encoding]::GetEncoding(28592))
 }
 
 function Set-AnykPathCfg([string]$prog) {
@@ -218,6 +242,40 @@ function Repair-AddModules([string]$prog, [string]$javaw) {
     }
 }
 
+# Az indítószkript a PATH-ban keresi a javát. Ha a Java nincs a PATH-ban (és nincs saját jre a
+# programmappában), a setenv.bat-ba beírjuk a helyét, különben az ÁNYK nem indulna.
+function Test-JavaPathon {
+    $utak = ([Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+             [Environment]::GetEnvironmentVariable('Path', 'User')) -split ';' | Where-Object { $_ }
+    foreach ($d in $utak) {
+        $d = [Environment]::ExpandEnvironmentVariables($d.Trim('"'))
+        if ($d -and (Test-Path -LiteralPath (Join-Path $d 'java.exe'))) { return $true }
+    }
+    $false
+}
+
+function Set-AbevJavaHome([string]$prog, [string]$javaw) {
+    $setenv = Join-Path $prog 'setenv.bat'
+    $jel = '@REM ANYK-Atkoltozes: a Java helye'
+    $sorok = @()
+    if (Test-Path -LiteralPath $setenv) {
+        $sorok = @([IO.File]::ReadAllLines($setenv) | Where-Object { $_ -ne $jel -and $_ -notmatch '^@IF NOT DEFINED ABEV_JAVA_HOME SET ABEV_JAVA_HOME=.*ANYK-Atkoltozes' })
+    }
+    $kell = -not (Test-Path -LiteralPath "$prog\jre\bin\java.exe") -and -not (Test-JavaPathon)
+    if ($kell) {
+        $bin = Split-Path $javaw
+        $sorok += $jel
+        $sorok += "@IF NOT DEFINED ABEV_JAVA_HOME SET ABEV_JAVA_HOME=`"$bin\`"& REM ANYK-Atkoltozes"
+    }
+    $uj = ($sorok -join "`r`n") + "`r`n"
+    $regi = if (Test-Path -LiteralPath $setenv) { [IO.File]::ReadAllText($setenv) } else { '' }
+    if ($uj -ne $regi -and ($kell -or $regi -match 'ANYK-Atkoltozes')) {
+        if ($regi) { Copy-Item -LiteralPath $setenv -Destination "$setenv.elotte-$Ido" -Force }
+        [IO.File]::WriteAllText($setenv, $uj, (New-Object Text.UTF8Encoding $false))
+        if ($kell) { Ok "A Java nincs a PATH-ban, a helyét beírtam: $setenv" }
+    }
+}
+
 function Test-AnykFut {
     $p = Get-CimInstance Win32_Process -Filter "Name='java.exe' OR Name='javaw.exe'" -ErrorAction SilentlyContinue |
          Where-Object { $_.CommandLine -match 'abevjava' }
@@ -235,6 +293,22 @@ function Copy-Dir([string]$src, [string]$dst, [string[]]$extra = @()) {
 function Get-FileCount([string]$d) {
     if (-not (Test-Path -LiteralPath $d)) { return 0 }
     @(Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+}
+
+function Get-DirSize([string]$d) {
+    if (-not (Test-Path -LiteralPath $d)) { return 0 }
+    $m = (Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    if ($m) { [long]$m } else { 0 }
+}
+
+# Személyes gyűjtőmappák (Dokumentumok, Asztal, Letöltések, OneDrive…): ezeket egészben nem mentjük
+# magától, mert az ÁNYK-n kívül minden más is bennük van.
+function Get-TagMappak {
+    $l = @($Profil)
+    foreach ($n in 'Desktop', 'MyDocuments', 'MyPictures', 'MyMusic', 'MyVideos') { $l += [Environment]::GetFolderPath($n) }
+    $l += (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction SilentlyContinue).'{374DE290-123F-4565-9164-39C4925E467B}'
+    $l += $env:OneDrive, $env:OneDriveCommercial, $env:OneDriveConsumer
+    $l | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') }
 }
 
 function Test-Under([string]$p, [string]$root) {
@@ -262,28 +336,41 @@ function Get-EnykPaths([string[]]$dirs) {
     $out | Sort-Object -Unique
 }
 
-# Útvonalak átírása az .enyk fájlokban (sima, dupla backslash, perjel és Java-properties alak).
+# Útvonalak cseréje EGYETLEN menetben (sima, dupla backslash, perjel és Java-properties alak).
+# Egymás utáni cserénél a már átírt szöveget a következő pár újra átírná:
+# C:\Users\Tibor -> C:\Users\Tibor.Takacs után a profilcsere Tibor.Takacs.Takacs-ot csinálna.
+# A régi útvonal után csak elválasztó jöhet, így a C:\Users\Tibor nem talál bele a C:\Users\Tibor2-be.
+function Convert-Utak([string]$t, $map) {
+    if (-not $t) { return $t }
+    $parok = @{}
+    foreach ($par in $map) {
+        $old = ([string]$par[0]).TrimEnd('\'); $new = ([string]$par[1]).TrimEnd('\')
+        if ($old.Length -lt 3 -or $old -ieq $new) { continue }
+        $valt = @(
+            @($old, $new),
+            @(($old -replace '\\', '\\'), ($new -replace '\\', '\\')),
+            @(($old -replace '\\', '/'), ($new -replace '\\', '/'))
+        )
+        if ($old -match '^[A-Za-z]:' -and $new -match '^[A-Za-z]:') {
+            $valt += , @(($old.Substring(0, 1) + '\:' + ($old.Substring(2) -replace '\\', '\\')),
+                         ($new.Substring(0, 1) + '\:' + ($new.Substring(2) -replace '\\', '\\')))
+        }
+        foreach ($v in $valt) { if (-not $parok.ContainsKey($v[0])) { $parok[$v[0]] = $v[1] } }
+    }
+    if ($parok.Count -eq 0) { return $t }
+    $minta = ($parok.Keys | Sort-Object Length -Descending | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    $re = New-Object Text.RegularExpressions.Regex ("(?:$minta)(?![^\\/\r\n\t""';,=])", 'IgnoreCase')
+    $re.Replace($t, [Text.RegularExpressions.MatchEvaluator]{ param($m) $parok[$m.Value] }.GetNewClosure())
+}
+
+# Útvonalak átírása a beállításfájlokban (.enyk, abevjavapath.cfg). Az eredetit megtartja.
 function Update-Enyk([string[]]$files, $map) {
     foreach ($f in $files) {
         $t = [IO.File]::ReadAllText($f, $Latin1)
-        $eredeti = $t
-        foreach ($par in $map) {
-            $old = $par[0].TrimEnd('\'); $new = $par[1].TrimEnd('\')
-            if ($old -ieq $new) { continue }
-            $valtozatok = @(
-                @($old, $new),
-                @(($old -replace '\\', '\\'), ($new -replace '\\', '\\')),
-                @(($old -replace '\\', '/'), ($new -replace '\\', '/')),
-                @(($old.Substring(0, 1) + '\:' + ($old.Substring(2) -replace '\\', '\\')),
-                  ($new.Substring(0, 1) + '\:' + ($new.Substring(2) -replace '\\', '\\')))
-            )
-            foreach ($v in $valtozatok) {
-                $t = [regex]::Replace($t, [regex]::Escape($v[0]), $v[1].Replace('$', '$$'), 'IgnoreCase')
-            }
-        }
-        if ($t -ne $eredeti) {
+        $uj = Convert-Utak $t $map
+        if ($uj -cne $t) {
             Copy-Item -LiteralPath $f -Destination "$f.elotte-$Ido" -Force
-            [IO.File]::WriteAllText($f, $t, $Latin1)
+            [IO.File]::WriteAllText($f, $uj, $Latin1)
             Ok "Útvonalak átírva: $f"
         }
     }
@@ -369,21 +456,63 @@ if ($Mentes) {
         Ok "Adatok: $adat"
     }
 
+    $figy = 0
+    # Az elektronikus feladás (KR) mappája: az ÁNYK a KRDIR környezeti változóban is tárolja.
+    $krDir = [Environment]::GetEnvironmentVariable('KRDIR', 'User')
+    if (-not $krDir) { $krDir = [Environment]::GetEnvironmentVariable('KRDIR', 'Machine') }
+    if ($krDir) { $krDir = $krDir.Trim().TrimEnd('\'); Ok "KR-mappa (KRDIR): $krDir" }
+
     # Egyéb adatmappák a beállításokból, plusz a kézzel megadottak.
     $kizart = @($env:windir, $env:TEMP, $env:ProgramData)
-    $jelolt = @(Get-EnykPaths @($beall, $prog)) + $ExtraPath
+    $tag = @(Get-TagMappak)
+    $jelolt = @(Get-EnykPaths @($beall, $prog)) + @($krDir) | ForEach-Object { [pscustomobject]@{ Ut = $_; Kezi = $false } }
+    $jelolt = @($jelolt) + @($ExtraPath | ForEach-Object { [pscustomobject]@{ Ut = $_; Kezi = $true } })
     $n = 0
-    foreach ($p in $jelolt) {
+    foreach ($j in $jelolt) {
+        $p = $j.Ut
         if (-not $p -or $p.Length -le 3) { continue }
         if (-not (Test-Path -LiteralPath $p -PathType Container)) { continue }
         $p = (Resolve-Path -LiteralPath $p).Path.TrimEnd('\')
         if ($p -match '\\(java|jre|jdk)[^\\]*(\\|$)|Eclipse Adoptium|Zulu|BellSoft') { continue }
         if ($kizart | Where-Object { Test-Under $p $_ }) { continue }
         if ($tetelek | Where-Object { Test-Under $p $_.Ut }) { continue }
-        if ($p -ieq $Profil -or (Test-Under $Profil $p)) { Warn "Túl tág mappa, kihagyom: $p"; continue }
+        if ($p -ieq $Profil -or (Test-Under $Profil $p)) { Warn "Túl tág mappa, kihagyom: $p"; $figy++; continue }
+        if (-not $j.Kezi -and -not $NagyMappa) {
+            $ok = $null
+            if ($tag | Where-Object { $_ -ieq $p }) { $ok = 'személyes gyűjtőmappa (az ÁNYK-n kívül minden más is benne van)' }
+            else {
+                $mb = [math]::Round((Get-DirSize $p) / 1MB)
+                if ($mb -gt $NagyMappaMB) { $ok = "$mb MB" }
+            }
+            if ($ok) {
+                $kell = $false
+                if (-not $Gui -and [Environment]::UserInteractive) {
+                    $v = Read-Host "[FIGY] Nagy mappa a beállításokban: $p ($ok). Mentsem ezt is? (i/n)"
+                    $kell = $v -match '^\s*i'
+                }
+                if (-not $kell) {
+                    Warn "Kihagyom: $p ($ok). Ha kell, mentsd újra a nagy mappákkal együtt (-NagyMappa, vagy a felületen a jelölőnégyzettel)."
+                    $figy++
+                    continue
+                }
+            }
+        }
         $n++
         $tetelek += [pscustomobject]@{ Nev = "extra$n"; Ut = $p; Tipus = 'adat' }
         Ok "Egyéb adatmappa: $p"
+    }
+
+    # Hely: a gyűjtés a TEMP-be megy, onnan a ZIP a célmappába.
+    $osszes = ($tetelek | ForEach-Object { Get-DirSize $_.Ut } | Measure-Object -Sum).Sum
+    Info "Mentendő adat: $([math]::Round($osszes / 1MB)) MB"
+    New-Item -ItemType Directory -Force -Path $Cel | Out-Null
+    foreach ($h in @($env:TEMP, (Resolve-Path $Cel).Path) | Select-Object -Unique) {
+        $q = Split-Path -Qualifier $h -ErrorAction SilentlyContinue
+        if (-not $q) { continue }
+        $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$q'" -ErrorAction SilentlyContinue
+        if ($d -and $d.FreeSpace -lt ($osszes * 1.1)) {
+            Fail "Nincs elég hely a $q meghajtón: $([math]::Round($d.FreeSpace / 1MB)) MB szabad, kb. $([math]::Round($osszes * 1.1 / 1MB)) MB kell."
+        }
     }
 
     $stage = Join-Path $env:TEMP "anyk-mentes-$Ido"
@@ -403,6 +532,7 @@ if ($Mentes) {
             Felhasznalo = $Felhasznalo
             Profil      = $Profil
             ProgramDir  = $prog
+            KrDir       = $krDir
             Tetelek     = $tetelek
         }
         [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), ($man | ConvertTo-Json -Depth 5), [Text.Encoding]::UTF8)
@@ -424,8 +554,9 @@ if ($Mentes) {
 
     $mb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
     Write-Host ''
-    Ok "Kész. $zipDb fájl, $mb MB."
+    if ($figy) { Warn "Kész, $figy figyelmeztetéssel. $zipDb fájl, $mb MB." } else { Ok "Kész. $zipDb fájl, $mb MB." }
     Ok "Mentés: $zip"
+    if ($figy) { Vege 4 }
     Vege 0
 }
 
@@ -463,6 +594,7 @@ if ($Telepites) {
         }
     }
     Repair-AddModules $prog $javaw
+    Set-AbevJavaHome $prog $javaw
     Write-Host ''
     Ok 'A gép készen áll a visszatöltésre.'
     Vege 0
@@ -549,6 +681,7 @@ try {
     Set-AnykPathCfg $prog
 
     # --- 4. Beállítások és adatok ---
+    $hiba = 0
     $map = New-Object System.Collections.ArrayList
     [void]$map.Add(@($man.ProgramDir, $prog))
     $eredmeny = @()
@@ -592,14 +725,33 @@ try {
                      Select-Object -ExpandProperty FullName
         }
     }
+    $cfgUser = Join-Path $beall 'abevjavapath.cfg'
+    if (Test-Path -LiteralPath $cfgUser) { $enyk += $cfgUser }
     if ($enyk) { Update-Enyk $enyk $map }
     $javaw = Find-Javaw $prog
     Repair-AddModules $prog $javaw
+    Set-AbevJavaHome $prog $javaw
+
+    # KRDIR környezeti változó annak a felhasználónak, akinek az adatai visszakerültek.
+    if ($man.KrDir) {
+        $ujKr = Convert-Utak $man.KrDir $map
+        try {
+            if ($Felhasznalo -ieq $env:USERNAME) {
+                [Environment]::SetEnvironmentVariable('KRDIR', $ujKr, 'User')
+            } else {
+                $sid = (New-Object Security.Principal.NTAccount($Felhasznalo)).Translate([Security.Principal.SecurityIdentifier]).Value
+                Set-ItemProperty -Path "Registry::HKEY_USERS\$sid\Environment" -Name KRDIR -Value $ujKr
+            }
+            Ok "KRDIR: $ujKr"
+        } catch {
+            Warn "A KRDIR változót nem tudtam beállítani. A(z) $Felhasznalo nevében futtasd: setx KRDIR `"$ujKr`""
+            $hiba++
+        }
+    }
 
     # --- 6. Ellenőrzés ---
     Write-Host ''
     Info 'Ellenőrzés'
-    $hiba = 0
     if (Test-AnykDir $prog) { Ok "ÁNYK program: $prog" } else { Warn "Nincs abevjava*.jar: $prog"; $hiba++ }
     $java = Join-Path (Split-Path $javaw) 'java.exe'
     $ver = & cmd.exe /c "`"$java`" -version 2>&1" | Select-Object -First 1

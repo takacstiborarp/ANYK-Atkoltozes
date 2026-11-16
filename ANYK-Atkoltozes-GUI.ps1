@@ -243,6 +243,10 @@ $pMentes.Controls.Add($tCel)
 $bCel = New-Gomb 'Tallózás' 476 194 140
 $pMentes.Controls.Add($bCel)
 $pMentes.Controls.Add((New-Cimke 'Pendrive vagy hálózati mappa a legjobb, hogy az új gépen elérd.' 24 226 592 $Betu $Szurke))
+$cNagy = New-Object Windows.Forms.CheckBox
+$cNagy.Text = 'Nagy mappák is (1 GB felett, vagy pl. a teljes Dokumentumok)'
+$cNagy.Location = '24,250'; $cNagy.Size = '592,24'; $cNagy.Font = $Betu; $cNagy.ForeColor = $Szurke
+$pMentes.Controls.Add($cNagy)
 
 $bMentesVissza = New-Gomb 'Vissza' 24 280 120
 $pMentes.Controls.Add($bMentesVissza)
@@ -280,12 +284,20 @@ $bMentesIndit.Add_Click({
     }
     $bMentesIndit.Enabled = $false; $bMentesVissza.Enabled = $false
     $allapot.Text = 'Mentés folyamatban. Ne zárd be az ablakot.'
-    Start-Feladat @('-Mentes', '-ProgramDir', "`"$($tProg.Text.TrimEnd('\'))`"", '-Cel', "`"$($tCel.Text.TrimEnd('\'))`"") {
+    $mArgs = @('-Mentes', '-ProgramDir', "`"$($tProg.Text.TrimEnd('\'))`"", '-Cel', "`"$($tCel.Text.TrimEnd('\'))`"")
+    if ($cNagy.Checked) { $mArgs += '-NagyMappa' }
+    Start-Feladat $mArgs {
         param($kod)
         $bMentesIndit.Enabled = $true; $bMentesVissza.Enabled = $true
-        if ($kod -eq 0) {
-            $allapot.Text = 'Kész. A ZIP-et vidd át az új gépre.'; $allapot.ForeColor = $Zold
-            if ([Windows.Forms.MessageBox]::Show($form, "A mentés elkészült.`r`n`r`nMegnyissam a mappát?", 'ÁNYK átköltöztetés', 'YesNo', 'Information') -eq 'Yes') {
+        if ($kod -eq 0 -or $kod -eq 4) {
+            if ($kod -eq 0) {
+                $allapot.Text = 'Kész. A ZIP-et vidd át az új gépre.'; $allapot.ForeColor = $Zold
+                $uzenet = "A mentés elkészült.`r`n`r`nMegnyissam a mappát?"; $jel = 'Information'
+            } else {
+                $allapot.Text = 'Kész, de figyelmeztetéssel. Nézd át a naplót ([FIGY] sorok).'; $allapot.ForeColor = $Narancs
+                $uzenet = "A mentés elkészült, de volt figyelmeztetés (pl. kihagyott nagy mappa).`r`nNézd át a naplót.`r`n`r`nMegnyissam a mappát?"; $jel = 'Warning'
+            }
+            if ([Windows.Forms.MessageBox]::Show($form, $uzenet, 'ÁNYK átköltöztetés', 'YesNo', $jel) -eq 'Yes') {
                 Start-Process explorer.exe $tCel.Text
             }
         } else {
