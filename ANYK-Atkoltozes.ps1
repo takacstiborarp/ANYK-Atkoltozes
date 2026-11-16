@@ -231,10 +231,11 @@ function Repair-AddModules([string]$prog, [string]$javaw) {
     & cmd.exe /c "`"$java`" -XX:+IgnoreUnrecognizedVMOptions --add-modules=java.se.ee -version >nul 2>&1"
     $rc = $LASTEXITCODE; $global:LASTEXITCODE = 0
     if ($rc -eq 0) { return }
-    Warn 'Ez a Java nem ismeri a java.se.ee modult. Kiveszem a kapcsolót az indítószkriptekből.'
+    $elso = $true
     Get-ChildItem -LiteralPath $prog -Filter 'abevjava_*.bat' -File | ForEach-Object {
         $t = [IO.File]::ReadAllText($_.FullName)
         if ($t -match '--add-modules=java\.se\.ee') {
+            if ($elso) { Warn 'Ez a Java nem ismeri a java.se.ee modult. Kiveszem a kapcsolót az indítószkriptekből.'; $elso = $false }
             Copy-Item -LiteralPath $_.FullName -Destination "$($_.FullName).elotte-$Ido" -Force
             [IO.File]::WriteAllText($_.FullName, ($t -replace ' ?--add-modules=java\.se\.ee', ''), (New-Object Text.UTF8Encoding $false))
             Ok "Javítva: $($_.Name)"
